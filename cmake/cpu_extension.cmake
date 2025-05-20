@@ -32,8 +32,15 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
 endif()
 
 if(MACOSX_FOUND)
-    list(APPEND CXX_COMPILE_FLAGS
+    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+        list(APPEND CXX_COMPILE_FLAGS
+            "-DVLLM_CPU_EXTENSION")
+    else()
+        list(APPEND CXX_COMPILE_FLAGS
+        "-Xpreprocessor"
+        "-fopenmp"
         "-DVLLM_CPU_EXTENSION")
+    endif()
 else()
     list(APPEND CXX_COMPILE_FLAGS
         "-fopenmp"
@@ -70,8 +77,27 @@ endfunction()
 
 is_avx512_disabled(AVX512_DISABLED)
 
-if (MACOSX_FOUND AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-    set(APPLE_SILICON_FOUND TRUE)
+message(STATUS "CMAKE_SYSTEM_PROCESSOR is ${CMAKE_SYSTEM_PROCESSOR}")
+
+if (MACOSX_FOUND)
+    set(ENABLE_NUMA OFF)
+    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        set(APPLE_SILICON_FOUND TRUE)
+    else()
+        message(STATUS "Intel macOS Detected. Using 'sysctl -n machdep.cpu.leaf7_features' for detection.")
+        execute_process(COMMAND sysctl -n machdep.cpu.leaf7_features
+                        RESULT_VARIABLE SYSCTL_RET
+                        OUTPUT_VARIABLE MACOS_CPU_FEATURES
+                        OUTPUT_STRIP_TRAILING_WHITESPACE
+                        ERROR_QUIET)
+        if(NOT SYSCTL_RET EQUAL 0)
+            message(WARNING "Failed to get CPU features using 'sysctl -n machdep.cpu.leaf7_features'. Detection might fail.")
+        else()
+            string(TOLOWER "${MACOS_CPU_FEATURES}" CPUINFO)
+            message(STATUS "Detected CPU leaf7 features (lowercase): ${CPUINFO}")
+            find_isa(${CPUINFO} "avx2" AVX2_FOUND)
+        endif()
+    endif()
 else()
     find_isa(${CPUINFO} "avx2" AVX2_FOUND)
     find_isa(${CPUINFO} "avx512f" AVX512_FOUND)
@@ -193,7 +219,7 @@ elseif(POWER10_FOUND)
     set(DNNL_CPU_RUNTIME "OMP")
 
     FetchContent_MakeAvailable(oneDNN)
-
+    
     list(APPEND LIBS dnnl)
 endif()
 
